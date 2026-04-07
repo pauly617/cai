@@ -136,7 +136,6 @@ from .interface import Model, ModelTracing
 if TYPE_CHECKING:
     from ..model_settings import ModelSettings
 
-
 # Suppress debug info from litellm
 litellm.suppress_debug_info = True
 
@@ -145,6 +144,9 @@ if os.getenv("CAI_MODEL") == "o3-mini" or os.getenv("CAI_MODEL") == "gemini-1.5-
 
 _USER_AGENT = f"Agents/Python {__version__}"
 _HEADERS = {"User-Agent": _USER_AGENT}
+
+# Default placeholder API key for the LiteLLM proxy server (any non-empty string works)
+_LITELLM_DEFAULT_API_KEY = "key"
 
 # Global registry to track active model instances
 # This allows us to access instance-based histories for commands like /history
@@ -378,8 +380,15 @@ class OpenAIChatCompletionsModel(Model):
     ) -> None:
         self.model = model
         self._client = openai_client
-        # Check if we're using OLLAMA models
-        self.is_ollama = os.getenv("OLLAMA") is not None and os.getenv("OLLAMA").lower() != "false"
+        # Check if we're using OLLAMA models.
+        # is_ollama is True when:
+        #   - OLLAMA env var is explicitly "true", OR
+        #   - OLLAMA_API_BASE is set to a local (non-cloud) endpoint
+        _ollama_api_base = os.getenv("OLLAMA_API_BASE", "")
+        self.is_ollama = (
+            os.getenv("OLLAMA", "").lower() == "true"
+            or (bool(_ollama_api_base) and "ollama.com" not in _ollama_api_base)
+        )
         self.empty_content_error_shown = False
 
         # Track interaction counter and token totals for cli display
@@ -2542,8 +2551,12 @@ class OpenAIChatCompletionsModel(Model):
         tracing: ModelTracing,
         stream: bool = False,
     ) -> ChatCompletion | tuple[Response, AsyncStream[ChatCompletionChunk]]:
-        # start by re-fetching self.is_ollama
-        self.is_ollama = os.getenv("OLLAMA") is not None and os.getenv("OLLAMA").lower() == "true"
+        # Re-fetch is_ollama in case env vars changed since __init__
+        _ollama_api_base = os.getenv("OLLAMA_API_BASE", "")
+        self.is_ollama = (
+            os.getenv("OLLAMA", "").lower() == "true"
+            or (bool(_ollama_api_base) and "ollama.com" not in _ollama_api_base)
+        )
 
         # IMPORTANT: Include existing message history for context
         converted_messages = []
@@ -3301,7 +3314,19 @@ class OpenAIChatCompletionsModel(Model):
         If a ContextWindowExceededError occurs due to a tool_call id being
         too long, truncate all tool_call ids in the messages to 40 characters
         and retry once silently.
+
+        When LITELLM_BASE_URL is set, all calls are routed through the LiteLLM
+        proxy server at that URL (OpenAI-compatible endpoint).
         """
+        # Route through LiteLLM proxy server if LITELLM_BASE_URL is configured
+        # and no provider-specific api_base has already been set (e.g. alias models)
+        litellm_proxy_url = os.getenv("LITELLM_BASE_URL")
+        if litellm_proxy_url and "api_base" not in kwargs:
+            kwargs["api_base"] = litellm_proxy_url
+            if "api_key" not in kwargs:
+                kwargs["api_key"] = os.getenv("LITELLM_API_KEY", _LITELLM_DEFAULT_API_KEY)
+            kwargs["custom_llm_provider"] = "openai"
+
         try:
             if stream:
                 # Standard LiteLLM handling for streaming

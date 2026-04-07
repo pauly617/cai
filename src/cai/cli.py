@@ -339,10 +339,18 @@ if is_pentestperf_available() and os.getenv("CTF_NAME", None):
     ctf_global = ctf
     ctf_init = 0
 
-# NOTE: This is needed when using LiteLLM Proxy Server
+# NOTE: LiteLLM Proxy Server support
+# When LITELLM_BASE_URL is set in your .env, all LiteLLM calls are automatically
+# routed through the proxy (no manual client setup required).
 #
+# Example .env configuration:
+#   LITELLM_BASE_URL=http://localhost:4000
+#   LITELLM_API_KEY=key   # any non-empty string
+#   CAI_MODEL=gpt-4o      # model name as configured in your proxy
+#
+# If you prefer to use a raw AsyncOpenAI client instead, uncomment below:
 # external_client = AsyncOpenAI(
-#     base_url = os.getenv('LITELLM_BASE_URL', 'http://localhost:4000'),
+#     base_url=os.getenv('LITELLM_BASE_URL', 'http://localhost:4000'),
 #     api_key=os.getenv('LITELLM_API_KEY', 'key'))
 #
 # set_default_openai_client(external_client)
